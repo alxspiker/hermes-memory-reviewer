@@ -55,7 +55,7 @@ The review job name must remain `pending-memory-grok-reviewer`: the tool checks 
 - **Atomic writes.** Approvals replay the proposal with Hermes's native memory store and its character-budget checks.
 - **Audit and backups.** Snapshots are created before changing a proposal or memory. Failures leave pending proposals intact.
 - **Prompt injection.** Pending text is untrusted and can contain instructions; the scheduled agent is explicitly told to ignore them.
-- **Least privilege.** Only the dedicated cron execution identity can call the review tool. Session toolsets are restricted to cron/CLI, and ordinary CLI calls are denied.
+- **Least privilege.** Only the dedicated named cron execution can operate the review tool. The job enables `memory-reviewer` and `no_mcp` only; other sessions are denied by the handler even if they discover the tool.
 
 The model still makes probabilistic judgments. For maximum safety, review changes to identity or standing authorization manually rather than relying on keyword protection alone.
 
