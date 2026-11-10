@@ -1,0 +1,9 @@
+name: memory-reviewer
+version: 0.2.0
+manifest_version: 2
+api_version: 1
+description: "Grok-operated review of staged Hermes memory writes, with revision, approval, rejection, and audit backups."
+author: "Alx Spiker"
+license: MIT
+provides_tools:
+  - memory_pending_review
