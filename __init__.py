@@ -264,27 +264,7 @@ def handle(args, **_):
 
 
 def register(ctx):
-    # Hermes 2026 tool-search automatically defers ALL plugin tools, even when a
-    # cron job enables exactly one tool. Give this narrow reviewer toolset the
-    # same direct-schema treatment as platform-only tools, restricted to cron.
-    # Without this, Grok may call the deferred tool without discovering it first.
-    # This compatibility shim is isolated to the plugin, not a core-file edit.
-    from toolsets import TOOLSET_SESSION_PLATFORMS
-    from tools import tool_search
-
-    original_platforms = TOOLSET_SESSION_PLATFORMS.get("memory-reviewer")
-    original_direct = tool_search._DIRECT_SURFACE_TOOLSETS
-    TOOLSET_SESSION_PLATFORMS["memory-reviewer"] = frozenset({"cron"})
-    tool_search._DIRECT_SURFACE_TOOLSETS = frozenset(set(original_direct) | {"memory-reviewer"})
-
-    def restore():
-        if original_platforms is None:
-            TOOLSET_SESSION_PLATFORMS.pop("memory-reviewer", None)
-        else:
-            TOOLSET_SESSION_PLATFORMS["memory-reviewer"] = original_platforms
-        tool_search._DIRECT_SURFACE_TOOLSETS = original_direct
-
-    ctx.on_unload(restore)
+    """Register with the supported Hermes plugin API; no host monkeypatching."""
     ctx.register_tool(name="memory_pending_review", toolset="memory-reviewer",
                       schema=SCHEMA, handler=handle,
                       description="Inspect, safely revise, approve or reject staged memory writes",
