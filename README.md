@@ -1,72 +1,89 @@
 # Hermes Memory Reviewer
 
-A native [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that lets a **Grok-pinned scheduled agent** review pending built-in memory changes individually. Review actions: **list, inspect, revise, approve, reject**.
+A native [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that uses a **dedicated, model-selectable scheduled agent** to review staged changes to Hermes' built-in memory. The reviewer can **list, inspect, revise, approve, and reject** individual pending proposals. No Grok subscription required: choose any provider and model supported by your configured Hermes installation.
 
-## Why
+## What it does
 
-Hermes stages memory patches and removals created by unattended background reviews because they may delete useful or safety-critical context. This plugin lets a separate Grok reviewer inspect the exact proposed operation **and the current memory entries** before deciding what to do.
+Hermes holds some unattended memory patches and removals in a pending queue rather than applying them blindly. The reviewer inspects the proposed operation **and the current memory entries** before deciding.
 
-A valid review run can:
+- **Approve** verified changes using Hermes' built-in replay and exact-entry pinning.
+- **Reject** duplicate, unrelated, unverified, or harmful changes.
+- **Revise** a salvageable proposal, inspect it again, then approve or reject.
+- **Hold for a human** when a destructive change touches a recognized standing permission boundary.
 
-- **Approve** a grounded update through Hermes' built-in pending replay and exact-entry pinning.
-- **Reject** a duplicated, unrelated, unverified, or harmful proposal.
-- **Revise** the existing pending proposal (e.g. convert an unrelated patch into a separate `add`), inspect it again, and then approve or reject.
-- **Leave protected changes pending** for a human when a standing permission boundary would be modified.
+It stores per-decision audit records under $HERMES_HOME/memory-reviewer/audit.jsonl and pre-change snapshots under $HERMES_HOME/backups/memory-reviewer/. These directories are private to the installing machine.
 
-The plugin stores a per-decision audit log under `$HERMES_HOME/memory-reviewer/audit.jsonl`, plus pre-change snapshots under `$HERMES_HOME/backups/memory-reviewer/`. Neither directory is in this repository.
+## Install
 
-## Install and update
-
-```sh
+~~~sh
 hermes plugins install alxspiker/hermes-memory-reviewer --enable
 bash "$HOME/.hermes/plugins/memory-reviewer/setup.sh"
-```
+~~~
 
-Once installed from Git, future releases are retrieved with:
+The first run offers an **interactive provider and model picker**. It includes your current Hermes default, configured custom provider IDs, and common supported provider names. Models already configured for the selected provider are offered; you can always enter an exact model ID. Suggestions are from **local config, not a live availability/credential check**. The picker makes no model inference calls.
 
-```sh
-hermes plugins update memory-reviewer
-```
+Setup configures the native Hermes cron scheduler, a monitoring wrapper, and memory.write_approval. The reviewer checks the queue once a minute. An unchanged queue **does not call the model**. A changed queue triggers the agent at the next tick (clearing a previously nonempty queue can cause one extra no-op run).
 
-The user's provider credentials, memories, approvals, and scheduler state remain local and are **never** in the public repository. Updating code does not require re-running setup, provided the job and monitor wrapper still exist.
+The job is limited to memory-reviewer and no_mcp; it does not inherit general MCP tool access. It uses its own model pin and **does not change your main Hermes model**.
 
-### First-time setup
+### Configure without a wizard
 
-The plugin does not silently schedule model calls when installed. Run `setup.sh` once after installing to configure the native Hermes cron job, monitor wrapper, and built-in memory approval setting. It creates a **Grok-pinned** reviewer that checks for changes once a minute and has **only** the `memory-reviewer` toolset with all MCP tools excluded (`no_mcp`).
+~~~sh
+bash "$HOME/.hermes/plugins/memory-reviewer/setup.sh" \
+  --provider openrouter --model "your/provider-model-id" --non-interactive
+~~~
 
-Optional environment variables for other deployments:
+You can also use environment variables:
 
-```sh
+~~~sh
 HERMES_REVIEW_PROVIDER=xai-oauth \
 HERMES_REVIEW_MODEL=grok-4.20-0309-reasoning \
-HERMES_REVIEW_TIMEZONE=UTC \
-bash "$HOME/.hermes/plugins/memory-reviewer/setup.sh"
-```
+bash "$HOME/.hermes/plugins/memory-reviewer/setup.sh" --non-interactive
+~~~
 
-The job uses Hermes's native `cron` scheduler and your existing provider authentication. A change to the pending queue wakes Grok at the next minute tick. No model runs on unchanged checks. A change back to an empty queue may cause one extra no-op run. The monitor wrapper points to the plugin's tracked `monitor.py`, so **updates to the monitor logic take effect after `hermes plugins update` without copying files again**.
+The optional --timezone America/Edmonton sets the job's timezone. New jobs default to UTC; existing jobs keep their timezone unless explicitly changed.
 
-The review job name must remain `pending-memory-grok-reviewer`: the tool checks that cron execution identity before allowing decisions. Hindsight's external memory provider is independent; `memory.write_approval` governs Hermes's built-in `MEMORY.md` and `USER.md` writes.
+**The selected provider must already be configured and authenticated in Hermes.** The exact model ID must be supported by that provider. Setup does not create credentials or verify availability by sending an API request.
 
-## Security and constraints
+### Change the model later
 
-- **No blind auto-approval.** Grok must inspect current entries before choosing one pending record at a time.
-- **Pinned destructive edits.** Revisions may not introduce a destructive target that was not pinned in the original proposal.
-- **Protected instructions.** Destructive changes to recognized permission-boundary entries are blocked from automatic approval; humans use `/memory approve <id>` if appropriate.
-- **Atomic writes.** Approvals replay the proposal with Hermes's native memory store and its character-budget checks.
-- **Audit and backups.** Snapshots are created before changing a proposal or memory. Failures leave pending proposals intact.
-- **Prompt injection.** Pending text is untrusted and can contain instructions; the scheduled agent is explicitly told to ignore them.
-- **Least privilege.** Only the dedicated named cron execution can operate the review tool. The job enables `memory-reviewer` and `no_mcp` only; other sessions are denied by the handler even if they discover the tool.
+Just rerun:
 
-The model still makes probabilistic judgments. For maximum safety, review changes to identity or standing authorization manually rather than relying on keyword protection alone.
+~~~sh
+bash "$HOME/.hermes/plugins/memory-reviewer/setup.sh" --configure
+~~~
+
+Or provide a new provider and model with the noninteractive flags. An existing job is **edited in place**: its ID, history, schedule and paused/active state are preserved. Its legacy pending-memory-grok-reviewer name is migrated to pending-memory-reviewer without creating a second job. Setup refuses ambiguous duplicates rather than guessing.
+
+### Update the plugin
+
+~~~sh
+hermes plugins update memory-reviewer
+~~~
+
+The monitoring wrapper loads monitor.py from the installed plugin directory, so Git updates change monitoring logic without copying files. Legacy Grok-named jobs continue to be authorized until you rerun setup. Credentials, approvals, memories and scheduler state remain local.
+
+## Safety boundaries
+
+- **No blind auto-approval.** The prompt requires inspecting current entries before deciding per proposal.
+- **Pinned destructive edits.** Revisions may not introduce destructive targets not pinned in the original.
+- **Protected instructions.** Recognized permission-boundary edits remain pending for human approval (/memory approve <id>).
+- **Atomic store writes.** Approvals use the native Hermes memory store and character-budget limits.
+- **Audit and backups.** Snapshots are created before changes; failures retain pending proposals.
+- **Prompt injection defense.** Pending content is untrusted data, not instructions.
+- **Least privilege.** Only the named cron execution can use the review tool.
+
+Memory review still involves probabilistic model judgments. Consider reviewing identity, permissions and standing authorizations manually. Hindsight's external memory provider is separate: memory.write_approval applies to Hermes' built-in MEMORY.md and USER.md, **not** Hindsight's external memory store.
 
 ## Testing
 
-```sh
-python3 -m py_compile __init__.py monitor.py
+~~~sh
+python3 -m py_compile __init__.py monitor.py configure.py
+python3 -m unittest discover -s tests -v
 hermes plugins validate "$HOME/.hermes/plugins/memory-reviewer"
-```
+~~~
 
-See Hermes cron history for the actual executed decisions: `hermes cron runs <job-id>`.
+Inspect actual run history with hermes cron runs <job-id>.
 
 ## License
 

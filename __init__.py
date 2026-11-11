@@ -1,4 +1,4 @@
-"""Native Hermes tool for one authorized, Grok-pinned memory review cron job.
+"""Native Hermes tool for the authorized model-independent memory review cron job.
 
 Uses Hermes's own pending store and MemoryStore (including matched-entry pinning,
 atomic batch validation and char budgets). Model text is never trusted as a path.
@@ -18,7 +18,8 @@ from pathlib import Path
 
 from hermes_constants import get_hermes_home
 
-JOB_NAME = "pending-memory-grok-reviewer"
+JOB_NAME = "pending-memory-reviewer"
+LEGACY_JOB_NAME = "pending-memory-grok-reviewer"  # Existing owners can update before reconfiguring.
 ID_RE = re.compile(r"^[a-f0-9]{8}$")
 ALLOWED = {"add", "remove", "patch"}
 # A remote LLM must not be allowed to silently erase hard safety/authorization rules.
@@ -27,7 +28,7 @@ HUMAN_ONLY = ("explicit user approval", "without explicit user ok", "never touch
 SCHEMA = {
     "name": "memory_pending_review",
     "description": (
-        "For the authorized Grok memory-review worker only: inspect the current pending "
+        "For the authorized scheduled memory-review worker only: inspect the current pending "
         "Hermes memory proposals, revise individual proposals, approve exact pinned edits, "
         "or reject them. Every action requires a substantive reason and is audited. "
         "Always inspect each proposal and current memory first. Do not auto-approve "
@@ -62,7 +63,7 @@ def _authorized():
     from cron.execution_identity import current_cron_execution
 
     execution = current_cron_execution()
-    return execution is not None and execution.job_name == JOB_NAME
+    return execution is not None and execution.job_name in (JOB_NAME, LEGACY_JOB_NAME)
 
 
 def _state_dir():
@@ -201,7 +202,7 @@ def _revise(record, args, store, wa, reason):
     backup = _backup(record)
     new_record = dict(record)
     new_record["payload"] = new_payload
-    new_record["summary"] = "Grok-reviewed revision: " + reason[:150]
+    new_record["summary"] = "Reviewer-checked revision: " + reason[:150]
     new_record["revision_count"] = int(record.get("revision_count") or 0) + 1
     new_record["revised_at"] = time.time()
     new_record["review_reason"] = reason
@@ -216,7 +217,7 @@ def _revise(record, args, store, wa, reason):
 def handle(args, **_):
     try:
         if not _authorized():
-            return _result(success=False, error="This tool is restricted to the authorized Grok memory-review cron job.")
+            return _result(success=False, error="This tool is restricted to the authorized memory-review cron job.")
         if not isinstance(args, dict):
             return _result(success=False, error="Expected a JSON argument object.")
         from tools import write_approval as wa
